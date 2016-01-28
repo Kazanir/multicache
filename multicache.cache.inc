@@ -1,7 +1,10 @@
 <?php
 
 class MultiCache extends DrupalDatabaseCache implements DrupalCacheInterface {
+
   protected $bin;
+
+  protected $local;
 
   /**
    * Constructs a MultiCache object.
@@ -12,8 +15,12 @@ class MultiCache extends DrupalDatabaseCache implements DrupalCacheInterface {
    * @param $local
    *   The local cache class being used if possible.
    */
-  function __construct($bin, $local = NULL) {
+  public function __construct($bin, $local = NULL) {
     // @todo: Construct an appropriate local cache object to use.
+    if (!$local || !class_exists($local)) {
+      $local = variable_get('multicache_local_cache_class', '');
+    }
+
     if (class_exists($local)) {
       $this->local = new $local($bin);
     }
@@ -27,17 +34,24 @@ class MultiCache extends DrupalDatabaseCache implements DrupalCacheInterface {
   /**
    * Implements DrupalCacheInterface::get().
    */
-  function get($cid) {
+  public function get($cid) {
     // Do garbage collection.
     $this->garbageCollection($this->bin);
 
     // Check the local cache for this cid.
     $item = $this->local->get($cid);
-    $hash = $this->hash($item->data);
-
-    // Query the item.
-    $result = db_query("SELECT cid, IF(hash = :hash, data, NULL) AS data, created, expire, serialized, hash FROM {" . db_escape_table($this->bin) . "} WHERE cid = :cid;", array(":cid" => $cid, ":hash" => $hash))->fetch();
-
+    dpm($item);
+    $hash = $item ? $this->hash($item->data) : FALSE;
+    dpm($hash);
+    // Query the item. Only get the value if there is no hash, or if the hash
+    // does not match.
+    if ($hash) {
+      $result = db_query("SELECT cid, IF(hash != :hash, data, NULL) AS data, created, expire, serialized, hash FROM {" . db_escape_table($this->bin) . "} WHERE cid = :cid;", array(":cid" => $cid, ":hash" => $hash))->fetch();
+    }
+    else {
+      $result = db_query("SELECT cid, data, created, expire, serialized, hash FROM {" . db_escape_table($this->bin) . "} WHERE cid = :cid;", array(":cid" => $cid))->fetch();
+    }
+    dpm($result);
     // If the item doesn't exist in the DB, it has been cleared.
     if (!$result) {
       return FALSE;
@@ -55,7 +69,7 @@ class MultiCache extends DrupalDatabaseCache implements DrupalCacheInterface {
   /**
    * Implements DrupalCacheInterface::set().
    */
-  function set($cid, $data, $expire = CACHE_PERMANENT) {
+  public function set($cid, $data, $expire = CACHE_PERMANENT) {
     $fields = array(
       'serialized' => 0,
       'created' => REQUEST_TIME,
@@ -84,7 +98,14 @@ class MultiCache extends DrupalDatabaseCache implements DrupalCacheInterface {
     }
   }
 
+  /**
+   * Hashes a given data value.
+   */
+  public function hash($data) {
+    $val = is_string($data) ? $data : serialize($data);
 
+    return crc32($val);
+  }
 
 }
 

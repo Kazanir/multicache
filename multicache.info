@@ -1,0 +1,6 @@
+name = "Multicache"
+description = "Provides a multi-web-node caching solution"
+package = Performance
+version = VERSION
+core = 7.x
+
